@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Data Report</title>
+    <style>
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #4CAF50; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+        .chart-container { width: 100%; height: 500px; }
+        #stockSearch { width: 300px; padding: 5px; margin-bottom: 10px; }
+        #stockList { max-height: 200px; overflow-y: auto; }
+        .stock-item { cursor: pointer; padding: 5px; }
+        .stock-item:hover { background-color: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>Stock Data Report</h1>
+    <input type="text" id="stockSearch" placeholder="Search stocks..." onkeyup="filterStocks()">
+    <div id="stockList"></div>
+    <h2>Current Stock Prices</h2>
+    <table id="currentPrices"></table>
+    <br>
+    <h2>Historical Data</h2>
+    <div class="chart-container">
+        <canvas id="historicalChart"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let currentChart = null;
+
+        async function loadData() {
+            // Load current prices
+            const currentResponse = await fetch('current_prices.json');
+            const currentData = await currentResponse.json();
+            const currentTable = document.getElementById('currentPrices');
+            currentTable.innerHTML = '<tr><th>Symbol</th><th>Price</th><th>Last Updated</th></tr>';
+            currentData.forEach(item => {
+                const row = currentTable.insertRow();
+                row.insertCell(0).innerText = item.symbol;
+                row.insertCell(1).innerText = item.current_price;
+                row.insertCell(2).innerText = item.last_updated;
+            });
+
+            // Populate stock list
+            const stocks = currentData.map(item => item.symbol.replace('.NS', ''));
+            const stockList = document.getElementById('stockList');
+            stockList.innerHTML = ''; // Clear previous list
+            stocks.forEach(stock => {
+                const div = document.createElement('div');
+                div.className = 'stock-item';
+                div.innerText = stock;
+                div.onclick = () => loadHistoricalData(stock);
+                stockList.appendChild(div);
+            });
+        }
+
+        async function loadHistoricalData(stock) {
+            const histResponse = await fetch(`${stock.toLowerCase()}_history.json`);
+            const histData = await histResponse.json();
+            const dates = histData.map(item => item.Date);
+            const prices = histData.map(item => item.Close);
+
+            if (currentChart) currentChart.destroy();
+
+            const ctx = document.getElementById('historicalChart').getContext('2d');
+            currentChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Close Price',
+                        data: prices,
+                        borderColor: 'blue',
+                        fill: false
+                    }]
+                },
+                options: {
+                    scales: { x: { title: { display: true, text: 'Date' } }, y: { title: { display: true, text: 'Price (INR)' } } },
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+        }
+
+        function filterStocks() {
+            const input = document.getElementById('stockSearch').value.toLowerCase();
+            const stockItems = document.getElementsByClassName('stock-item');
+            for (let item of stockItems) {
+                if (item.innerText.toLowerCase().includes(input)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            }
+        }
+
+        function refreshData() {
+            location.reload();
+        }
+
+        window.onload = loadData;
+    </script>
+</body>
+</html>

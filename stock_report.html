@@ -1,114 +1,125 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Stock Report</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        #stockList .stock-item { cursor: pointer; padding: 5px; }
-        #stockList .stock-item:hover { background-color: #f0f0f0; }
-        #historicalChart { max-height: 400px; }
-    </style>
-</head>
-<body>
-    <h1>Stock Report</h1>
-    <input type="text" id="stockSearch" placeholder="Search stocks..." oninput="filterStocks()">
-    <div id="stockList"></div>
-    <table id="currentPrices"></table>
-    <canvas id="historicalChart"></canvas>
-    <button onclick="refreshData()">Refresh</button>
+<script>
+    let currentChart = null;
 
-    <script>
-        let currentChart = null;
+    async function loadData() {
+        const loading = document.getElementById('loading');
+        loading.style.display = 'block';
+        try {
+            const currentResponse = await fetch('current_prices.json');
+            const currentData = await currentResponse.json();
+            const currentTable = document.getElementById('currentPrices');
+            if (!currentTable) {
+                console.error('Element with id "currentPrices" not found');
+                return;
+            }
+            currentTable.innerHTML = '<tr><th>Symbol</th><th>Price</th><th>Market Cap (INR)</th><th>Last Updated</th></tr>';
+            currentData.forEach(item => {
+                const row = currentTable.insertRow();
+                row.insertCell(0).innerText = item.symbol;
+                row.insertCell(1).innerText = item.current_price;
+                row.insertCell(2).innerText = item.market_cap ? (item.market_cap / 10000000).toFixed(2) + ' Cr' : 'N/A';
+                row.insertCell(3).innerText = item.last_updated;
+            });
 
-        async function loadData() {
-            try {
-                const currentResponse = await fetch('current_prices.json');
-                const currentData = await currentResponse.json();
-                const currentTable = document.getElementById('currentPrices');
-                if (!currentTable) {
-                    console.error('Element with id "currentPrices" not found');
-                    return;
+            const stocks = currentData.map(item => item.symbol.replace('.NS', ''));
+            const stockList = document.getElementById('stockList');
+            if (!stockList) {
+                console.error('Element with id "stockList" not found');
+                return;
+            }
+            stockList.innerHTML = '';
+            stocks.forEach(stock => {
+                const div = document.createElement('div');
+                div.className = 'stock-item';
+                div.innerText = stock;
+                div.onclick = () => loadHistoricalData(stock);
+                stockList.appendChild(div);
+            });
+        } catch (error) {
+            console.error('Error loading data:', error);
+        } finally {
+            loading.style.display = 'none';
+        }
+    }
+
+    async function loadHistoricalData(stock) {
+        try {
+            const histResponse = await fetch(`${stock.toLowerCase()}_history.json`);
+            const histData = await histResponse.json();
+            const dates = histData.map(item => item.Date);
+            const prices = histData.map(item => item.Close);
+
+            // Calculate daily returns
+            const returns = [];
+            for (let i = 1; i < prices.length; i++) {
+                returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+            }
+
+            // Volatility (standard deviation of daily returns)
+            const meanReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length || 0;
+            const variance = returns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / returns.length || 0;
+            const volatility = Math.sqrt(variance) * Math.sqrt(252); // Annualized volatility
+
+            // Sharpe Ratio (assuming 2% annual risk-free rate, daily adjusted)
+            const riskFreeRate = 0.02 / 252; // Daily risk-free rate
+            const sharpeRatio = (meanReturn - riskFreeRate) / (volatility || 1e-10); // Avoid division by zero
+
+            if (currentChart) currentChart.destroy();
+
+            const ctx = document.getElementById('historicalChart');
+            if (!ctx) {
+                console.error('Element with id "historicalChart" not found');
+                return;
+            }
+            currentChart = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Close Price',
+                        data: prices,
+                        borderColor: 'blue',
+                        fill: false,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { x: { title: { display: true, text: 'Date' } }, y: { title: { display: true, text: 'Price (INR)' } } },
+                    plugins: { legend: { position: 'top' } }
                 }
-                currentTable.innerHTML = '<tr><th>Symbol</th><th>Price</th><th>Last Updated</th></tr>';
-                currentData.forEach(item => {
-                    const row = currentTable.insertRow();
-                    row.insertCell(0).innerText = item.symbol;
-                    row.insertCell(1).innerText = item.current_price;
-                    row.insertCell(2).innerText = item.last_updated;
-                });
+            });
 
-                const stocks = currentData.map(item => item.symbol.replace('.NS', ''));
-                const stockList = document.getElementById('stockList');
-                if (!stockList) {
-                    console.error('Element with id "stockList" not found');
-                    return;
-                }
-                stockList.innerHTML = '';
-                stocks.forEach(stock => {
-                    const div = document.createElement('div');
-                    div.className = 'stock-item';
-                    div.innerText = stock;
-                    div.onclick = () => loadHistoricalData(stock);
-                    stockList.appendChild(div);
-                });
-            } catch (error) {
-                console.error('Error loading data:', error);
+            // Display metrics
+            const metrics = document.getElementById('metrics');
+            metrics.innerHTML = `
+                <p>Volatility: ${volatility.toFixed(4)}</p>
+                <p>Sharpe Ratio: ${sharpeRatio.toFixed(4)}</p>
+            `;
+        } catch (error) {
+            console.error('Error loading historical data:', error);
+        }
+    }
+
+    function filterStocks() {
+        const input = document.getElementById('stockSearch').value.toLowerCase();
+        const stockItems = document.getElementsByClassName('stock-item');
+        for (let item of stockItems) {
+            if (item.innerText.toLowerCase().includes(input)) {
+                item.style.display = '';
+            } else {
+                item.style.display = 'none';
             }
         }
+    }
 
-        async function loadHistoricalData(stock) {
-            try {
-                const histResponse = await fetch(`${stock.toLowerCase()}_history.json`);
-                const histData = await histResponse.json();
-                const dates = histData.map(item => item.Date);
-                const prices = histData.map(item => item.Close);
+    function refreshData() {
+        location.reload();
+    }
 
-                if (currentChart) currentChart.destroy();
+    // Auto-refresh every 5 minutes (300,000 ms)
+    setInterval(loadData, 300000);
 
-                const ctx = document.getElementById('historicalChart');
-                if (!ctx) {
-                    console.error('Element with id "historicalChart" not found');
-                    return;
-                }
-                currentChart = new Chart(ctx.getContext('2d'), {
-                    type: 'line',
-                    data: {
-                        labels: dates,
-                        datasets: [{
-                            label: 'Close Price',
-                            data: prices,
-                            borderColor: 'blue',
-                            fill: false
-                        }]
-                    },
-                    options: {
-                        scales: { x: { title: { display: true, text: 'Date' } }, y: { title: { display: true, text: 'Price (INR)' } } },
-                        plugins: { legend: { position: 'top' } }
-                    }
-                });
-            } catch (error) {
-                console.error('Error loading historical data:', error);
-            }
-        }
-
-        function filterStocks() {
-            const input = document.getElementById('stockSearch').value.toLowerCase();
-            const stockItems = document.getElementsByClassName('stock-item');
-            for (let item of stockItems) {
-                if (item.innerText.toLowerCase().includes(input)) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            }
-        }
-
-        function refreshData() {
-            location.reload();
-        }
-
-        window.onload = loadData; // Single instance, inside the script tag
-    </script>
-</body>
-</html>
+    window.onload = loadData;
+</script>
